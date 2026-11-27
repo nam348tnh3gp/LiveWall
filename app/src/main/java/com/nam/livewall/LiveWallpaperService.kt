@@ -36,6 +36,7 @@ class LiveWallpaperService : WallpaperService() {
         private var ow = 0f
         private var oh = 0f
         private var visible = false
+        private var dirty = false           // source changed while hidden: reload when shown
         private var hasSurface = false
         private var useHw = true            // hardware canvas for static images (falls back if the device refuses)
         private var w = 0
@@ -75,7 +76,12 @@ class LiveWallpaperService : WallpaperService() {
                     draw()
                 }
                 // New file (several keys change together): debounce into one reload.
-                else -> { handler.removeCallbacks(reload); handler.postDelayed(reload, 200) }
+                // While the wallpaper is hidden (the app is in front) just remember it: decoding a big
+                // image / starting a video on the shared main thread is what made the app UI stutter.
+                else -> {
+                    if (visible) { handler.removeCallbacks(reload); handler.postDelayed(reload, 200) }
+                    else { dirty = true }
+                }
             }
         }
 
@@ -93,7 +99,7 @@ class LiveWallpaperService : WallpaperService() {
         override fun onSurfaceCreated(holder: SurfaceHolder) {
             super.onSurfaceCreated(holder)
             hasSurface = true
-            load()
+            if (visible) load() else dirty = true
         }
 
         override fun onSurfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
@@ -118,7 +124,7 @@ class LiveWallpaperService : WallpaperService() {
 
         override fun onVisibilityChanged(v: Boolean) {
             visible = v
-            applyVisibility()
+            if (v && dirty && hasSurface) load() else applyVisibility()
         }
 
         override fun onDestroy() {
@@ -166,6 +172,7 @@ class LiveWallpaperService : WallpaperService() {
         }
 
         private fun load() {
+            dirty = false
             release()
             if (!hasSurface) return
             val f = prefs.file() ?: return

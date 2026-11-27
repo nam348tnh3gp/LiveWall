@@ -94,7 +94,8 @@ fun Screen() {
     var parallax by remember { mutableStateOf(prefs.parallax) }
     var crisp by remember { mutableStateOf(prefs.crisp) }
     var name by remember { mutableStateOf(if (prefs.file() != null) prefs.name else "") }
-    val lang = AppCompatDelegate.getApplicationLocales()[0]?.language ?: Locale.getDefault().language
+    // Read once: getApplicationLocales() is a binder call on Android 13+, too costly to run on every recomposition.
+    val lang = remember { AppCompatDelegate.getApplicationLocales()[0]?.language ?: Locale.getDefault().language }
     val errorMsg = stringResource(R.string.copy_error)
     val cardColor = Color(0xFF26244A)
     val soft = Color(0xFFB9B3E6)
