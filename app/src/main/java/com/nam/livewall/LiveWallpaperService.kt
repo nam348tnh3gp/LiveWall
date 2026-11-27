@@ -27,6 +27,8 @@ class LiveWallpaperService : WallpaperService() {
         private var player: MediaPlayer? = null
         private var img: Drawable? = null
         private var visible = false
+        private var ow = 0f
+        private var oh = 0f
         private var w = 0
         private var h = 0
         private var tx = 0f
@@ -113,7 +115,9 @@ class LiveWallpaperService : WallpaperService() {
                         prepareAsync()
                     }
                 } else {
-                    val d = ImageDecoder.decodeDrawable(ImageDecoder.createSource(f))
+                    val d = ImageDecoder.decodeDrawable(ImageDecoder.createSource(f)) { _, info, _ ->
+                        ow = info.size.width.toFloat(); oh = info.size.height.toFloat()
+                    }
                     if (d is AnimatedImageDrawable) {
                         d.repeatCount = AnimatedImageDrawable.REPEAT_INFINITE
                         d.callback = object : Drawable.Callback {
@@ -134,16 +138,23 @@ class LiveWallpaperService : WallpaperService() {
             val c = surfaceHolder.lockCanvas() ?: return
             try {
                 c.drawColor(Color.BLACK)
-                val iw = d.intrinsicWidth.toFloat(); val ih = d.intrinsicHeight.toFloat()
+                val iw = if (ow > 0) ow else d.intrinsicWidth.toFloat()
+                val ih = if (oh > 0) oh else d.intrinsicHeight.toFloat()
                 if (iw <= 0 || ih <= 0) return
+                d.setFilterBitmap(!prefs.crisp)
                 val sx = w / iw; val sy = h / ih
                 var kx: Float; var ky: Float
                 when (prefs.mode) {
+                    Prefs.AUTO -> {
+                        val fit = min(sx, sy); val fill = max(sx, sy)
+                        kx = if (fill / fit <= 1.15f) fill else fit; ky = kx
+                    }
                     Prefs.FIT -> { kx = min(sx, sy); ky = kx }
                     Prefs.STRETCH -> { kx = sx; ky = sy }
+                    Prefs.ORIGINAL -> { kx = 1f; ky = 1f }
                     else -> { kx = max(sx, sy); ky = kx }
                 }
-                if (prefs.parallax && prefs.mode != Prefs.FIT) { kx *= 1.1f; ky *= 1.1f }
+                if (prefs.parallax && prefs.mode != Prefs.FIT && prefs.mode != Prefs.ORIGINAL) { kx *= 1.1f; ky *= 1.1f }
                 tx += (targetX - tx) * 0.12f; ty += (targetY - ty) * 0.12f
                 val dw = iw * kx; val dh = ih * ky
                 val l = (w - dw) / 2 + if (prefs.parallax) tx else 0f

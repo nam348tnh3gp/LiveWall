@@ -9,10 +9,14 @@
     <string name="fill">Lấp đầy</string>
     <string name="fit">Vừa khít</string>
     <string name="stretch">Kéo giãn</string>
-    <string name="mode_note">Vừa khít áp dụng cho GIF/WebP. Video dùng Lấp đầy hoặc Kéo giãn.</string>
+    <string name="mode_note">Tự căn giữ đúng tỉ lệ, không kéo giãn. Gốc 1:1 giữ nguyên độ phân giải. Video dùng Lấp đầy hoặc Kéo giãn.</string>
     <string name="parallax">Parallax 3D</string>
     <string name="parallax_desc">Ảnh dịch chuyển khi nghiêng máy (GIF/WebP)</string>
     <string name="set_wall">Đặt làm hình nền</string>
     <string name="language">Ngôn ngữ</string>
     <string name="copy_error">Không mở được tệp này</string>
+    <string name="auto">Tự căn</string>
+    <string name="original">Gốc 1:1</string>
+    <string name="crisp">Điểm ảnh sắc nét</string>
+    <string name="crisp_desc">Không làm mịn khi phóng to (nét hơn với ảnh pixel)</string>
 </resources>

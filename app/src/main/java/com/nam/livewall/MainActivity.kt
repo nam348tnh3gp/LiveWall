@@ -48,6 +48,7 @@ fun Screen() {
     val prefs = remember { Prefs(ctx) }
     var mode by remember { mutableIntStateOf(prefs.mode) }
     var parallax by remember { mutableStateOf(prefs.parallax) }
+    var crisp by remember { mutableStateOf(prefs.crisp) }
     var name by remember { mutableStateOf(if (prefs.file() != null) prefs.name else "") }
     val lang = AppCompatDelegate.getApplicationLocales()[0]?.language ?: Locale.getDefault().language
     val errorMsg = stringResource(R.string.copy_error)
@@ -105,15 +106,19 @@ fun Screen() {
             ElevatedCard(shape = RoundedCornerShape(24.dp), colors = CardDefaults.elevatedCardColors(containerColor = cardColor)) {
                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text(stringResource(R.string.mode_title), color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf(Prefs.FILL to R.string.fill, Prefs.FIT to R.string.fit, Prefs.STRETCH to R.string.stretch)
-                            .forEach { (m, res) ->
+                    listOf(
+                        listOf(Prefs.AUTO to R.string.auto, Prefs.FILL to R.string.fill, Prefs.FIT to R.string.fit),
+                        listOf(Prefs.STRETCH to R.string.stretch, Prefs.ORIGINAL to R.string.original)
+                    ).forEach { rowItems ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            rowItems.forEach { (m, res) ->
                                 FilterChip(
                                     selected = mode == m,
                                     onClick = { mode = m; prefs.mode = m },
                                     label = { Text(stringResource(res)) }
                                 )
                             }
+                        }
                     }
                     Text(stringResource(R.string.mode_note), color = soft, fontSize = 12.sp)
                     HorizontalDivider(color = Color(0x33FFFFFF))
@@ -123,6 +128,13 @@ fun Screen() {
                             Text(stringResource(R.string.parallax_desc), color = soft, fontSize = 12.sp)
                         }
                         Switch(checked = parallax, onCheckedChange = { parallax = it; prefs.parallax = it })
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(stringResource(R.string.crisp), color = Color.White, fontWeight = FontWeight.SemiBold)
+                            Text(stringResource(R.string.crisp_desc), color = soft, fontSize = 12.sp)
+                        }
+                        Switch(checked = crisp, onCheckedChange = { crisp = it; prefs.crisp = it })
                     }
                 }
             }
