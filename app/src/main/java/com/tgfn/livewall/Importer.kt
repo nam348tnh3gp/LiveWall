@@ -24,8 +24,11 @@ object Importer {
         val dest = File(ctx.filesDir, "wall_${System.currentTimeMillis()}.bin")
         check(tmp.renameTo(dest))
 
-        Prefs(ctx).setSource(dest.path, video, name)
-        ctx.filesDir.listFiles()?.filter { it.name.startsWith("wall_") && it != dest }?.forEach { it.delete() }
+        val prefs = Prefs(ctx)
+        prefs.setSource(dest.path, video, name, prefs.target)
+        // Keep every file still used by either screen.
+        val keep = setOf(prefs.path(false), prefs.path(true))
+        ctx.filesDir.listFiles()?.filter { it.name.startsWith("wall_") && it.path !in keep }?.forEach { it.delete() }
         true
     }.getOrDefault(false)
 }

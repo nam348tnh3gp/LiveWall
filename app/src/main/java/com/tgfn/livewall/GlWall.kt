@@ -77,7 +77,10 @@ class GlWall(private val target: Surface) {
     fun useVideoSurface(cb: (Surface) -> Unit) {
         gh.post {
             if (!ok || released) return@post
-            content = VIDEO; hasFrame = false; vw = 0f; vh = 0f
+            // Keep the last frame on screen while a player is re-created (hide/show), but start clean
+            // when coming from an image.
+            if (content != VIDEO) { hasFrame = false; vw = 0f; vh = 0f }
+            content = VIDEO
             videoSurface?.let(cb)
         }
     }

@@ -1,5 +1,6 @@
 package com.tgfn.livewall
 
+import android.app.KeyguardManager
 import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -11,8 +12,10 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.util.Log
 import android.media.AudioAttributes
 import android.media.MediaPlayer
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.service.wallpaper.WallpaperService
@@ -35,6 +38,7 @@ class LiveWallpaperService : WallpaperService() {
         private val handler = Handler(Looper.getMainLooper())
         private val sm = getSystemService(SENSOR_SERVICE) as SensorManager
         private var player: MediaPlayer? = null
+        private var videoFile: File? = null   // current video; the player only exists while visible
         private var gl: GlWall? = null
         private var gen = 0                 // bumped on every releaseContent(); invalidates stale async callbacks
         private var prepared = false
@@ -44,6 +48,8 @@ class LiveWallpaperService : WallpaperService() {
         private var animIdx = 0
         private var origScale = 1f          // ORIGINAL mode scale (decode sample size)
         private var visible = false
+        private var loadedPath: String? = null   // what this engine currently shows
+        private var loadedVideo = false
         private var dirty = false           // source changed while hidden: reload when shown
         private var hasSurface = false
         private var w = 0
@@ -90,10 +96,40 @@ class LiveWallpaperService : WallpaperService() {
                 // New file (several keys change together): debounce into one reload.
                 // While hidden just remember it: loading on the shared main thread made the app UI stutter.
                 else -> {
-                    if (visible) { handler.removeCallbacks(reload); handler.postDelayed(reload, 200) }
-                    else { dirty = true }
+                    // Home and lock engines share these prefs: only reload when OUR screen's file changed.
+                    if (needsReload()) {
+                        if (visible) { handler.removeCallbacks(reload); handler.postDelayed(reload, 200) }
+                        else { dirty = true }
+                    }
                 }
             }
+        }
+
+        /** Flags of the screen this engine renders (Android 13/14+ only; 0 = unknown). */
+        private fun wallFlags(): Int {
+            if (Build.VERSION.SDK_INT < 33) return 0
+            return runCatching {
+                WallpaperService.Engine::class.java.getMethod("getWallpaperFlags").invoke(this) as Int
+            }.getOrDefault(0)
+        }
+
+        /**
+         * Which screen's file to show. Android 13/14+ tells the engine which screen it renders.
+         * On older versions (down to Android 9) there is no such API, so we go by the keyguard:
+         * visible while the lock screen is up = lock screen file, otherwise the home screen file.
+         * This is engine-agnostic, so it also works when one engine serves both screens.
+         */
+        private fun isLock(): Boolean {
+            val f = wallFlags()
+            if (f != 0) return f and 2 != 0 && f and 1 == 0   // FLAG_LOCK set, FLAG_SYSTEM not
+            if (isPreview) return false
+            val km = getSystemService(KEYGUARD_SERVICE) as? KeyguardManager
+            return km?.isKeyguardLocked == true
+        }
+
+        private fun needsReload(): Boolean {
+            val lock = isLock()
+            return prefs.path(lock) != loadedPath || prefs.isVideo(lock) != loadedVideo
         }
 
         private fun readSettings() {
@@ -136,7 +172,8 @@ class LiveWallpaperService : WallpaperService() {
 
         override fun onVisibilityChanged(v: Boolean) {
             visible = v
-            if (v && dirty && hasSurface) load() else applyVisibility()
+            // Re-check on every show: the lock/home file may differ (keyguard state can change between shows).
+            if (v && hasSurface && (dirty || needsReload())) load() else applyVisibility()
         }
 
         override fun onDestroy() {
@@ -157,7 +194,7 @@ class LiveWallpaperService : WallpaperService() {
             handler.removeCallbacks(tick); tickPosted = false
             sm.unregisterListener(this)
             if (visible) {
-                player?.let { if (prepared && !it.isPlaying) runCatching { it.start() } }
+                startVideo()
                 img?.start()
                 kick()
                 if (parallax) {
@@ -166,20 +203,27 @@ class LiveWallpaperService : WallpaperService() {
                     }
                 }
             } else {
-                player?.let { if (prepared && it.isPlaying) runCatching { it.pause() } }
+                // Free the hardware decoder right away: phones allow very few at once, and the home
+                // and lock screen engines would otherwise starve each other (one stays black).
+                stopPlayer()
                 img?.stop()
             }
         }
 
         /** Stops the current file (player / animation). The GL renderer stays: it belongs to the surface. */
         private fun releaseContent() {
+            stopPlayer()
+            videoFile = null
+            img?.let { it.stop(); it.callback = null }
+            img = null
+            animBmps = arrayOfNulls(2)
+        }
+
+        private fun stopPlayer() {
             gen++
             prepared = false
             player?.let { runCatching { it.setOnErrorListener(null); it.reset(); it.release() } }
             player = null
-            img?.let { it.stop(); it.callback = null }
-            img = null
-            animBmps = arrayOfNulls(2)
         }
 
         private fun releaseGl() {
@@ -192,14 +236,19 @@ class LiveWallpaperService : WallpaperService() {
             releaseContent()
             if (!hasSurface) return
             val g = gl ?: GlWall(surfaceHolder.surface).also { gl = it }
-            val f = prefs.file()
+            val lock = isLock()
+            val f = prefs.file(lock)
+            loadedPath = f?.path
+            loadedVideo = prefs.isVideo(lock)
+            Log.i("LiveWall", "load lock=$lock preview=$isPreview file=${f?.name} video=$loadedVideo")
             if (f == null) {
                 g.clear()
                 return
             }
             try {
-                if (prefs.isVideo) loadVideo(f, g) else loadImage(f, g)
+                if (loadedVideo) loadVideo(f, g) else loadImage(f, g)
             } catch (e: Throwable) {
+                Log.w("LiveWall", "load failed", e)
                 releaseContent()
                 g.clear()
             }
@@ -210,12 +259,23 @@ class LiveWallpaperService : WallpaperService() {
         // ---------------------------------------------------------------- video
 
         private fun loadVideo(f: File, g: GlWall) {
+            videoFile = f
+            if (visible) startVideo()
+        }
+
+        /** Creates the player if a video is loaded, we are visible and there is none yet. */
+        private fun startVideo() {
+            val f = videoFile ?: return
+            val g = gl ?: return
+            if (player != null || !visible) return
             val myGen = gen
             // The GL thread calls back once the video SurfaceTexture is ready.
             g.useVideoSurface { vs ->
                 handler.post {
-                    if (gen != myGen || !hasSurface) return@post
-                    try { startPlayer(f, vs) } catch (e: Throwable) { releaseContent() }
+                    if (gen != myGen || !hasSurface || !visible || player != null) return@post
+                    try { startPlayer(f, vs) } catch (e: Throwable) {
+                        Log.w("LiveWall", "startPlayer failed", e); stopPlayer()
+                    }
                 }
             }
         }
@@ -243,10 +303,11 @@ class LiveWallpaperService : WallpaperService() {
                 if (visible) runCatching { p.start() }
                 draw()
             }
-            mp.setOnErrorListener { p, _, _ ->
+            mp.setOnErrorListener { p, what, extra ->
+                Log.w("LiveWall", "MediaPlayer error what=$what extra=$extra (retry $retries)")
                 if (player === p) {
                     handler.removeCallbacks(reload)
-                    if (retries++ < 3) handler.postDelayed(reload, 500) else releaseContent()
+                    if (retries++ < 3) handler.postDelayed(reload, 500) else stopPlayer()
                 }
                 true
             }

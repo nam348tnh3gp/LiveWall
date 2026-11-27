@@ -92,6 +92,18 @@ fun openChooser(ctx: Context) {
 }
 
 @Composable
+private fun FileRow(label: String, name: String, soft: Color) {
+    // Label and file name on separate lines so a long name is never pushed out of view.
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(label, color = soft, fontSize = 13.sp)
+        Text(
+            name, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
+            maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.fillMaxWidth()
+        )
+    }
+}
+
+@Composable
 fun Screen() {
     val ctx = LocalContext.current
     val prefs = remember { Prefs(ctx) }
@@ -100,7 +112,10 @@ fun Screen() {
     var crisp by remember { mutableStateOf(prefs.crisp) }
     var sound by remember { mutableStateOf(prefs.sound) }
     val ver = sourceVersion.intValue
-    val name = remember(ver) { if (prefs.file() != null) prefs.name else "" }
+    val homeName = remember(ver) { if (prefs.file(false) != null) prefs.name(false) else "" }
+    val lockName = remember(ver) { if (prefs.file(true) != null) prefs.name(true) else "" }
+    val name = homeName.ifEmpty { lockName }
+    var target by remember { mutableIntStateOf(prefs.target) }
     // Read once: getApplicationLocales() is a binder call on Android 13+, too costly to run on every recomposition.
     val lang = remember { AppCompatDelegate.getApplicationLocales()[0]?.language ?: Locale.getDefault().language }
     val errorMsg = stringResource(R.string.copy_error)
@@ -144,16 +159,27 @@ fun Screen() {
                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     if (name.isEmpty()) {
                         Text(stringResource(R.string.none), color = Color.White, fontSize = 16.sp)
+                    } else if (homeName == lockName) {
+                        FileRow(stringResource(R.string.selected_label), name, soft)
                     } else {
-                        // Label and file name on separate lines so a long name is never pushed out of view.
-                        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Text(stringResource(R.string.selected_label), color = soft, fontSize = 13.sp)
-                            Text(
-                                name, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold,
-                                maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.fillMaxWidth()
+                        if (homeName.isNotEmpty()) FileRow(stringResource(R.string.home_label), homeName, soft)
+                        if (lockName.isNotEmpty()) FileRow(stringResource(R.string.lock_label), lockName, soft)
+                    }
+                    Text(stringResource(R.string.apply_to), color = soft, fontSize = 13.sp)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(
+                            Prefs.T_HOME to R.string.target_home,
+                            Prefs.T_LOCK to R.string.target_lock,
+                            Prefs.T_BOTH to R.string.target_both
+                        ).forEach { (t, res) ->
+                            FilterChip(
+                                selected = target == t,
+                                onClick = { target = t; prefs.target = t },
+                                label = { Text(stringResource(res)) }
                             )
                         }
                     }
+                    Text(stringResource(R.string.target_note), color = soft, fontSize = 12.sp)
                     Button(
                         onClick = { picker.launch(arrayOf("image/*", "video/*")) },
                         modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(16.dp)

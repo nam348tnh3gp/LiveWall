@@ -22,5 +22,12 @@
     <string name="crisp_desc">No smoothing when enlarging (sharper pixel art)</string>
     <string name="sound">Sound</string>
     <string name="sound_desc">Play the video audio (video only; plays while the wallpaper is visible)</string>
+    <string name="home_label">Home screen</string>
+    <string name="lock_label">Lock screen</string>
+    <string name="apply_to">Apply the next file to</string>
+    <string name="target_home">Home</string>
+    <string name="target_lock">Lock</string>
+    <string name="target_both">Both</string>
+    <string name="target_note">In the system dialog choose "Home and lock screen" once. After that, pick the file here and choose where it shows.</string>
     <string name="updated">Wallpaper updated</string>
 </resources>
