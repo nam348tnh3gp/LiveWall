@@ -20,5 +20,7 @@
     <string name="original">Original 1:1</string>
     <string name="crisp">Crisp pixels</string>
     <string name="crisp_desc">No smoothing when enlarging (sharper pixel art)</string>
+    <string name="sound">Sound</string>
+    <string name="sound_desc">Play the video audio (video only; plays while the wallpaper is visible)</string>
     <string name="updated">Wallpaper updated</string>
 </resources>

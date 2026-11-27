@@ -20,5 +20,7 @@
     <string name="original">Gốc 1:1</string>
     <string name="crisp">Điểm ảnh sắc nét</string>
     <string name="crisp_desc">Không làm mịn khi phóng to (nét hơn với ảnh pixel)</string>
+    <string name="sound">Âm thanh</string>
+    <string name="sound_desc">Phát tiếng của video (chỉ với video; phát khi hình nền đang hiển thị)</string>
     <string name="updated">Đã cập nhật hình nền</string>
 </resources>

@@ -9,6 +9,7 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.os.Handler
 import android.os.Looper
@@ -51,6 +52,7 @@ class LiveWallpaperService : WallpaperService() {
         private var mode = Prefs.AUTO
         private var parallax = false
         private var crisp = false
+        private var sound = false
 
         private var tickPosted = false
         private val tick = object : Runnable {
@@ -69,6 +71,11 @@ class LiveWallpaperService : WallpaperService() {
 
         private val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
             when (key) {
+                // Sound: just change the player volume, no reload.
+                Prefs.K_SOUND -> {
+                    readSettings()
+                    player?.let { applyVolume(it) }
+                }
                 // Display options: apply instantly, no re-decode / re-prepare.
                 Prefs.K_MODE, Prefs.K_PARALLAX, Prefs.K_CRISP -> {
                     readSettings()
@@ -86,7 +93,7 @@ class LiveWallpaperService : WallpaperService() {
         }
 
         private fun readSettings() {
-            mode = prefs.mode; parallax = prefs.parallax; crisp = prefs.crisp
+            mode = prefs.mode; parallax = prefs.parallax; crisp = prefs.crisp; sound = prefs.sound
             if (!parallax) { tx = 0f; ty = 0f; targetX = 0f; targetY = 0f }
         }
 
@@ -203,7 +210,13 @@ class LiveWallpaperService : WallpaperService() {
             mp.setSurface(vs)
             mp.setDataSource(f.path)
             mp.isLooping = true
-            mp.setVolume(0f, 0f)
+            // Wallpaper audio: media usage, and no audio focus is requested so it never pauses the user's music.
+            mp.setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MOVIE).build()
+            )
+            applyVolume(mp)
             mp.setOnVideoSizeChangedListener { p, vw, vh ->
                 if (player === p) gl?.setVideoSize(vw, vh)
             }
@@ -222,6 +235,11 @@ class LiveWallpaperService : WallpaperService() {
                 true
             }
             mp.prepareAsync()
+        }
+
+        private fun applyVolume(mp: MediaPlayer) {
+            val v = if (sound) 1f else 0f
+            runCatching { mp.setVolume(v, v) }
         }
 
         // ---------------------------------------------------------------- image (Canvas)

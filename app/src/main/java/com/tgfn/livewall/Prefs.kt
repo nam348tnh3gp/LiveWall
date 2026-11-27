@@ -15,6 +15,9 @@ class Prefs(ctx: Context) {
     var crisp: Boolean
         get() = sp.getBoolean("crisp", false)
         set(v) = sp.edit().putBoolean("crisp", v).apply()
+    var sound: Boolean
+        get() = sp.getBoolean(K_SOUND, false)
+        set(v) = sp.edit().putBoolean(K_SOUND, v).apply()
     val isVideo: Boolean get() = sp.getBoolean("video", false)
     val name: String get() = sp.getString("name", "") ?: ""
 
@@ -27,7 +30,7 @@ class Prefs(ctx: Context) {
     }
 
     companion object {
-        const val K_MODE = "mode"; const val K_PARALLAX = "parallax"; const val K_CRISP = "crisp"
+        const val K_MODE = "mode"; const val K_PARALLAX = "parallax"; const val K_CRISP = "crisp"; const val K_SOUND = "sound"
         const val AUTO = 0; const val FILL = 1; const val FIT = 2; const val STRETCH = 3; const val ORIGINAL = 4
     }
 }

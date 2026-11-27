@@ -98,6 +98,7 @@ fun Screen() {
     var mode by remember { mutableIntStateOf(prefs.mode) }
     var parallax by remember { mutableStateOf(prefs.parallax) }
     var crisp by remember { mutableStateOf(prefs.crisp) }
+    var sound by remember { mutableStateOf(prefs.sound) }
     val ver = sourceVersion.intValue
     val name = remember(ver) { if (prefs.file() != null) prefs.name else "" }
     // Read once: getApplicationLocales() is a binder call on Android 13+, too costly to run on every recomposition.
@@ -192,6 +193,13 @@ fun Screen() {
                             Text(stringResource(R.string.crisp_desc), color = soft, fontSize = 12.sp)
                         }
                         Switch(checked = crisp, onCheckedChange = { crisp = it; prefs.crisp = it })
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) {
+                            Text(stringResource(R.string.sound), color = Color.White, fontWeight = FontWeight.SemiBold)
+                            Text(stringResource(R.string.sound_desc), color = soft, fontSize = 12.sp)
+                        }
+                        Switch(checked = sound, onCheckedChange = { sound = it; prefs.sound = it })
                     }
                 }
             }
