@@ -112,10 +112,7 @@ fun Screen() {
     var crisp by remember { mutableStateOf(prefs.crisp) }
     var sound by remember { mutableStateOf(prefs.sound) }
     val ver = sourceVersion.intValue
-    val homeName = remember(ver) { if (prefs.file(false) != null) prefs.name(false) else "" }
-    val lockName = remember(ver) { if (prefs.file(true) != null) prefs.name(true) else "" }
-    val name = homeName.ifEmpty { lockName }
-    var target by remember { mutableIntStateOf(prefs.target) }
+    val name = remember(ver) { if (prefs.file() != null) prefs.name else "" }
     // Read once: getApplicationLocales() is a binder call on Android 13+, too costly to run on every recomposition.
     val lang = remember { AppCompatDelegate.getApplicationLocales()[0]?.language ?: Locale.getDefault().language }
     val errorMsg = stringResource(R.string.copy_error)
@@ -159,27 +156,9 @@ fun Screen() {
                 Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
                     if (name.isEmpty()) {
                         Text(stringResource(R.string.none), color = Color.White, fontSize = 16.sp)
-                    } else if (homeName == lockName) {
-                        FileRow(stringResource(R.string.selected_label), name, soft)
                     } else {
-                        if (homeName.isNotEmpty()) FileRow(stringResource(R.string.home_label), homeName, soft)
-                        if (lockName.isNotEmpty()) FileRow(stringResource(R.string.lock_label), lockName, soft)
+                        FileRow(stringResource(R.string.selected_label), name, soft)
                     }
-                    Text(stringResource(R.string.apply_to), color = soft, fontSize = 13.sp)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf(
-                            Prefs.T_HOME to R.string.target_home,
-                            Prefs.T_LOCK to R.string.target_lock,
-                            Prefs.T_BOTH to R.string.target_both
-                        ).forEach { (t, res) ->
-                            FilterChip(
-                                selected = target == t,
-                                onClick = { target = t; prefs.target = t },
-                                label = { Text(stringResource(res)) }
-                            )
-                        }
-                    }
-                    Text(stringResource(R.string.target_note), color = soft, fontSize = 12.sp)
                     Button(
                         onClick = { picker.launch(arrayOf("image/*", "video/*")) },
                         modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(16.dp)

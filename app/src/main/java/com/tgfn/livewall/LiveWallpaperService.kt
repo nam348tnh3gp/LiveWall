@@ -1,10 +1,5 @@
 package com.tgfn.livewall
 
-import android.app.KeyguardManager
-import android.content.BroadcastReceiver
-import android.content.Context
-import android.content.Intent
-import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -19,13 +14,11 @@ import android.hardware.SensorManager
 import android.util.Log
 import android.media.AudioAttributes
 import android.media.MediaPlayer
-import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.service.wallpaper.WallpaperService
 import android.view.Surface
 import android.view.SurfaceHolder
-import androidx.core.content.ContextCompat
 import java.io.File
 import kotlin.math.abs
 import kotlin.math.max
@@ -53,8 +46,6 @@ class LiveWallpaperService : WallpaperService() {
         private var animIdx = 0
         private var origScale = 1f          // ORIGINAL mode scale (decode sample size)
         private var visible = false
-        private var loadedPath: String? = null   // what this engine currently shows
-        private var loadedVideo = false
         private var dirty = false           // source changed while hidden: reload when shown
         private var hasSurface = false
         private var w = 0
@@ -101,50 +92,8 @@ class LiveWallpaperService : WallpaperService() {
                 // New file (several keys change together): debounce into one reload.
                 // While hidden just remember it: loading on the shared main thread made the app UI stutter.
                 else -> {
-                    // Home and lock engines share these prefs: only reload when OUR screen's file changed.
-                    if (needsReload()) {
-                        if (visible) { handler.removeCallbacks(reload); handler.postDelayed(reload, 200) }
-                        else { dirty = true }
-                    }
-                }
-            }
-        }
-
-        /** Flags of the screen this engine renders (Android 13/14+ only; 0 = unknown). */
-        private fun wallFlags(): Int {
-            if (Build.VERSION.SDK_INT < 33) return 0
-            return runCatching {
-                WallpaperService.Engine::class.java.getMethod("getWallpaperFlags").invoke(this) as Int
-            }.getOrDefault(0)
-        }
-
-        /**
-         * Which screen's file to show. Android 13/14+ tells the engine which screen it renders.
-         * On older versions (down to Android 9) there is no such API, so we go by the keyguard:
-         * visible while the lock screen is up = lock screen file, otherwise the home screen file.
-         * This is engine-agnostic, so it also works when one engine serves both screens.
-         */
-        private fun isLock(): Boolean {
-            val f = wallFlags()
-            if (f != 0) return f and 2 != 0 && f and 1 == 0   // FLAG_LOCK set, FLAG_SYSTEM not
-            if (isPreview) return false
-            val km = getSystemService(KEYGUARD_SERVICE) as? KeyguardManager
-            return km?.isKeyguardLocked == true
-        }
-
-        private fun needsReload(): Boolean {
-            val lock = isLock()
-            return prefs.path(lock) != loadedPath || prefs.isVideo(lock) != loadedVideo
-        }
-
-        // The same engine can stay visible while the keyguard goes up or down (lock -> unlock), so no
-        // visibility event fires. Watch the screen / unlock broadcasts to swap lock <-> home file.
-        private val screenReceiver = object : BroadcastReceiver() {
-            override fun onReceive(c: Context, i: Intent) {
-                handler.post {
-                    if (hasSurface && needsReload()) {
-                        if (visible) { handler.removeCallbacks(reload); handler.post(reload) } else dirty = true
-                    }
+                    if (visible) { handler.removeCallbacks(reload); handler.postDelayed(reload, 200) }
+                    else { dirty = true }
                 }
             }
         }
@@ -158,14 +107,6 @@ class LiveWallpaperService : WallpaperService() {
             super.onCreate(holder)
             readSettings()
             prefs.sp.registerOnSharedPreferenceChangeListener(listener)
-            val f = IntentFilter().apply {
-                addAction(Intent.ACTION_SCREEN_ON); addAction(Intent.ACTION_USER_PRESENT)
-            }
-            runCatching {
-                ContextCompat.registerReceiver(
-                    this@LiveWallpaperService, screenReceiver, f, ContextCompat.RECEIVER_NOT_EXPORTED
-                )
-            }
         }
 
         override fun onSurfaceCreated(holder: SurfaceHolder) {
@@ -197,13 +138,11 @@ class LiveWallpaperService : WallpaperService() {
 
         override fun onVisibilityChanged(v: Boolean) {
             visible = v
-            // Re-check on every show: the lock/home file may differ (keyguard state can change between shows).
-            if (v && hasSurface && (dirty || needsReload())) load() else applyVisibility()
+            if (v && dirty && hasSurface) load() else applyVisibility()
         }
 
         override fun onDestroy() {
             prefs.sp.unregisterOnSharedPreferenceChangeListener(listener)
-            runCatching { unregisterReceiver(screenReceiver) }
             handler.removeCallbacksAndMessages(null)
             sm.unregisterListener(this)
             releaseContent()
@@ -262,17 +201,15 @@ class LiveWallpaperService : WallpaperService() {
             releaseContent()
             if (!hasSurface) return
             val g = gl ?: GlWall(surfaceHolder.surface).also { gl = it }
-            val lock = isLock()
-            val f = prefs.file(lock)
-            loadedPath = f?.path
-            loadedVideo = prefs.isVideo(lock)
-            Log.i("LiveWall", "load lock=$lock preview=$isPreview file=${f?.name} video=$loadedVideo")
+            val f = prefs.file()
+            val video = prefs.isVideo
+            Log.i("LiveWall", "load preview=$isPreview file=${f?.name} video=$video")
             if (f == null) {
                 g.clear()
                 return
             }
             try {
-                if (loadedVideo) loadVideo(f, g) else loadImage(f, g)
+                if (video) loadVideo(f, g) else loadImage(f, g)
             } catch (e: Throwable) {
                 Log.w("LiveWall", "load failed", e)
                 releaseContent()

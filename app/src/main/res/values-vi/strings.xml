@@ -22,12 +22,5 @@
     <string name="crisp_desc">Không làm mịn khi phóng to (nét hơn với ảnh pixel)</string>
     <string name="sound">Âm thanh</string>
     <string name="sound_desc">Phát tiếng của video (chỉ với video; phát khi hình nền đang hiển thị)</string>
-    <string name="home_label">Màn hình chờ</string>
-    <string name="lock_label">Màn hình khóa</string>
-    <string name="apply_to">Áp dụng tệp tiếp theo cho</string>
-    <string name="target_home">Màn chờ</string>
-    <string name="target_lock">Màn khóa</string>
-    <string name="target_both">Cả hai</string>
-    <string name="target_note">Ở hộp thoại hệ thống, chọn "Màn hình chờ và màn hình khóa" một lần. Sau đó chọn tệp tại đây và chọn nơi hiển thị.</string>
     <string name="updated">Đã cập nhật hình nền</string>
 </resources>
