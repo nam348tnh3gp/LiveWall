@@ -4,7 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import java.io.File
 
-class Prefs(private val ctx: Context) {
+class Prefs(ctx: Context) {
     val sp: SharedPreferences = ctx.getSharedPreferences("lw", Context.MODE_PRIVATE)
     var mode: Int
         get() = sp.getInt("mode", AUTO)
@@ -15,16 +15,16 @@ class Prefs(private val ctx: Context) {
     var crisp: Boolean
         get() = sp.getBoolean("crisp", false)
         set(v) = sp.edit().putBoolean("crisp", v).apply()
-    var isVideo: Boolean
-        get() = sp.getBoolean("video", false)
-        set(v) = sp.edit().putBoolean("video", v).apply()
-    var name: String
-        get() = sp.getString("name", "") ?: ""
-        set(v) = sp.edit().putString("name", v).apply()
-    var stamp: Long
-        get() = sp.getLong("stamp", 0L)
-        set(v) = sp.edit().putLong("stamp", v).apply()
-    fun file(): File? = File(ctx.filesDir, "wall.bin").takeIf { it.exists() }
+    val isVideo: Boolean get() = sp.getBoolean("video", false)
+    val name: String get() = sp.getString("name", "") ?: ""
+
+    fun file(): File? = sp.getString("path", null)?.let { File(it) }?.takeIf { it.exists() }
+
+    /** One atomic edit so the wallpaper reloads once, never half-way. */
+    fun setSource(path: String, video: Boolean, name: String) {
+        sp.edit().putString("path", path).putBoolean("video", video)
+            .putString("name", name).putLong("stamp", System.currentTimeMillis()).apply()
+    }
 
     companion object { const val AUTO = 0; const val FILL = 1; const val FIT = 2; const val STRETCH = 3; const val ORIGINAL = 4 }
 }

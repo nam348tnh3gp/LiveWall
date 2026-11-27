@@ -14,6 +14,7 @@ import android.os.Handler
 import android.os.Looper
 import android.service.wallpaper.WallpaperService
 import android.view.SurfaceHolder
+import java.io.File
 import kotlin.math.max
 import kotlin.math.min
 
@@ -25,10 +26,13 @@ class LiveWallpaperService : WallpaperService() {
         private val handler = Handler(Looper.getMainLooper())
         private val sm = getSystemService(SENSOR_SERVICE) as SensorManager
         private var player: MediaPlayer? = null
+        private var prepared = false
+        private var retries = 0
         private var img: Drawable? = null
-        private var visible = false
         private var ow = 0f
         private var oh = 0f
+        private var visible = false
+        private var hasSurface = false
         private var w = 0
         private var h = 0
         private var tx = 0f
@@ -39,11 +43,13 @@ class LiveWallpaperService : WallpaperService() {
         private val tick = object : Runnable {
             override fun run() {
                 draw()
-                if (visible && img != null) handler.postDelayed(this, 33)
+                if (visible && (img is AnimatedImageDrawable || prefs.parallax)) handler.postDelayed(this, 33)
             }
         }
+        private val reload = Runnable { load() }
+        // Debounced: several pref changes -> one reload
         private val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
-            handler.post { load(); draw() }
+            handler.removeCallbacks(reload); handler.postDelayed(reload, 200)
         }
 
         override fun onCreate(holder: SurfaceHolder) {
@@ -53,6 +59,7 @@ class LiveWallpaperService : WallpaperService() {
 
         override fun onSurfaceCreated(holder: SurfaceHolder) {
             super.onSurfaceCreated(holder)
+            hasSurface = true
             load()
         }
 
@@ -62,24 +69,17 @@ class LiveWallpaperService : WallpaperService() {
             draw()
         }
 
+        // The surface dies when the wallpaper is replaced/re-set: drop the player or it errors next time.
+        override fun onSurfaceDestroyed(holder: SurfaceHolder) {
+            hasSurface = false
+            handler.removeCallbacks(tick); handler.removeCallbacks(reload)
+            release()
+            super.onSurfaceDestroyed(holder)
+        }
+
         override fun onVisibilityChanged(v: Boolean) {
             visible = v
-            if (v) {
-                player?.let { if (!it.isPlaying) runCatching { it.start() } }
-                (img as? AnimatedImageDrawable)?.start()
-                handler.removeCallbacks(tick); handler.post(tick)
-                sm.unregisterListener(this)
-                if (prefs.parallax && img != null) {
-                    sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.let {
-                        sm.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME)
-                    }
-                }
-            } else {
-                player?.let { if (it.isPlaying) it.pause() }
-                (img as? AnimatedImageDrawable)?.stop()
-                handler.removeCallbacks(tick)
-                sm.unregisterListener(this)
-            }
+            applyVisibility()
         }
 
         override fun onDestroy() {
@@ -90,52 +90,94 @@ class LiveWallpaperService : WallpaperService() {
             super.onDestroy()
         }
 
+        private fun applyVisibility() {
+            handler.removeCallbacks(tick)
+            sm.unregisterListener(this)
+            if (visible) {
+                player?.let { if (prepared && !it.isPlaying) runCatching { it.start() } }
+                (img as? AnimatedImageDrawable)?.start()
+                if (img != null) handler.post(tick)
+                if (prefs.parallax && img != null) {
+                    sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.let {
+                        sm.registerListener(this, it, SensorManager.SENSOR_DELAY_GAME)
+                    }
+                }
+            } else {
+                player?.let { if (prepared && it.isPlaying) runCatching { it.pause() } }
+                (img as? AnimatedImageDrawable)?.stop()
+            }
+        }
+
         private fun release() {
-            player?.release(); player = null
-            (img as? AnimatedImageDrawable)?.stop(); img = null
+            prepared = false
+            player?.let { runCatching { it.setOnErrorListener(null); it.reset(); it.release() } }
+            player = null
+            (img as? AnimatedImageDrawable)?.stop()
+            img = null
         }
 
         private fun load() {
             release()
+            if (!hasSurface) return
             val f = prefs.file() ?: return
-            runCatching {
-                if (prefs.isVideo) {
-                    player = MediaPlayer().apply {
-                        setSurface(surfaceHolder.surface)
-                        setDataSource(f.path)
-                        isLooping = true
-                        setVolume(0f, 0f)
-                        setOnPreparedListener {
-                            it.setVideoScalingMode(
-                                if (prefs.mode == Prefs.STRETCH) MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT
-                                else MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING
-                            )
-                            if (visible) it.start()
-                        }
-                        prepareAsync()
-                    }
-                } else {
-                    val d = ImageDecoder.decodeDrawable(ImageDecoder.createSource(f)) { _, info, _ ->
-                        ow = info.size.width.toFloat(); oh = info.size.height.toFloat()
-                    }
-                    if (d is AnimatedImageDrawable) {
-                        d.repeatCount = AnimatedImageDrawable.REPEAT_INFINITE
-                        d.callback = object : Drawable.Callback {
-                            override fun invalidateDrawable(who: Drawable) {}
-                            override fun scheduleDrawable(who: Drawable, what: Runnable, `when`: Long) {}
-                            override fun unscheduleDrawable(who: Drawable, what: Runnable) {}
-                        }
-                    }
-                    img = d
+            try {
+                if (prefs.isVideo) loadVideo(f) else loadImage(f)
+            } catch (e: Throwable) {
+                release()
+            }
+            applyVisibility()
+        }
+
+        private fun loadVideo(f: File) {
+            val mp = MediaPlayer()
+            player = mp
+            mp.setSurface(surfaceHolder.surface)
+            mp.setDataSource(f.path)
+            mp.isLooping = true
+            mp.setVolume(0f, 0f)
+            mp.setOnPreparedListener { p ->
+                if (player !== p) return@setOnPreparedListener
+                p.setVideoScalingMode(
+                    if (prefs.mode == Prefs.STRETCH) MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT
+                    else MediaPlayer.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING
+                )
+                prepared = true; retries = 0
+                if (visible) runCatching { p.start() }
+            }
+            mp.setOnErrorListener { p, _, _ ->
+                if (player === p) {
+                    handler.removeCallbacks(reload)
+                    if (retries++ < 3) handler.postDelayed(reload, 500) else release()
+                }
+                true
+            }
+            mp.prepareAsync()
+        }
+
+        private fun loadImage(f: File) {
+            val d = ImageDecoder.decodeDrawable(ImageDecoder.createSource(f)) { dec, info, _ ->
+                // Software bitmaps only: hardware bitmaps crash on a software wallpaper canvas.
+                dec.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                val big = max(info.size.width, info.size.height)
+                val sample = if (big > 4096) (big + 4095) / 4096 else 1
+                if (sample > 1) dec.setTargetSampleSize(sample)
+                ow = (info.size.width / sample).toFloat(); oh = (info.size.height / sample).toFloat()
+            }
+            if (d is AnimatedImageDrawable) {
+                d.repeatCount = AnimatedImageDrawable.REPEAT_INFINITE
+                d.callback = object : Drawable.Callback {
+                    override fun invalidateDrawable(who: Drawable) {}
+                    override fun scheduleDrawable(who: Drawable, what: Runnable, `when`: Long) {}
+                    override fun unscheduleDrawable(who: Drawable, what: Runnable) {}
                 }
             }
-            if (visible) onVisibilityChanged(true)
+            img = d
         }
 
         private fun draw() {
             val d = img ?: return
             if (w == 0 || h == 0) return
-            val c = surfaceHolder.lockCanvas() ?: return
+            val c = try { surfaceHolder.lockCanvas() } catch (e: Throwable) { null } ?: return
             try {
                 c.drawColor(Color.BLACK)
                 val iw = if (ow > 0) ow else d.intrinsicWidth.toFloat()
@@ -154,15 +196,18 @@ class LiveWallpaperService : WallpaperService() {
                     Prefs.ORIGINAL -> { kx = 1f; ky = 1f }
                     else -> { kx = max(sx, sy); ky = kx }
                 }
-                if (prefs.parallax && prefs.mode != Prefs.FIT && prefs.mode != Prefs.ORIGINAL) { kx *= 1.1f; ky *= 1.1f }
+                val par = prefs.parallax && prefs.mode != Prefs.FIT && prefs.mode != Prefs.ORIGINAL
+                if (par) { kx *= 1.1f; ky *= 1.1f }
                 tx += (targetX - tx) * 0.12f; ty += (targetY - ty) * 0.12f
                 val dw = iw * kx; val dh = ih * ky
-                val l = (w - dw) / 2 + if (prefs.parallax) tx else 0f
-                val t = (h - dh) / 2 + if (prefs.parallax) ty else 0f
+                val l = (w - dw) / 2 + if (par) tx else 0f
+                val t = (h - dh) / 2 + if (par) ty else 0f
                 d.setBounds(l.toInt(), t.toInt(), (l + dw).toInt(), (t + dh).toInt())
                 d.draw(c)
+            } catch (e: Throwable) {
+                // never crash the wallpaper process on a bad frame
             } finally {
-                surfaceHolder.unlockCanvasAndPost(c)
+                runCatching { surfaceHolder.unlockCanvasAndPost(c) }
             }
         }
 

@@ -2,6 +2,11 @@ package com.nam.livewall
 
 import android.app.WallpaperManager
 import android.content.ComponentName
+import android.content.Context
+import android.content.SharedPreferences
+import android.os.Handler
+import android.os.Looper
+import androidx.core.content.IntentCompat
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -39,7 +44,46 @@ class MainActivity : AppCompatActivity() {
                 Screen()
             }
         }
+        if (savedInstanceState == null) handleIncoming(intent)
     }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        handleIncoming(intent)
+    }
+
+    /** Gallery "Set as" / Share -> this app. Import the file, then open the live wallpaper confirm screen. */
+    private fun handleIncoming(i: Intent?) {
+        val uri: Uri = when (i?.action) {
+            Intent.ACTION_SEND -> IntentCompat.getParcelableExtra(i, Intent.EXTRA_STREAM, Uri::class.java)
+            Intent.ACTION_ATTACH_DATA, Intent.ACTION_VIEW -> i.data
+            else -> null
+        } ?: return
+        i?.action = null
+        Thread {
+            val ok = Importer.import(this, uri)
+            runOnUiThread {
+                if (!ok) {
+                    Toast.makeText(this, R.string.copy_error, Toast.LENGTH_SHORT).show()
+                } else {
+                    val active = WallpaperManager.getInstance(this).wallpaperInfo?.component?.className ==
+                        LiveWallpaperService::class.java.name
+                    if (active) Toast.makeText(this, R.string.updated, Toast.LENGTH_SHORT).show()
+                    else openChooser(this)
+                }
+            }
+        }.start()
+    }
+}
+
+fun openChooser(ctx: Context) {
+    ctx.startActivity(
+        Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER).putExtra(
+            WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT,
+            ComponentName(ctx, LiveWallpaperService::class.java)
+        )
+    )
 }
 
 @Composable
@@ -55,17 +99,20 @@ fun Screen() {
     val cardColor = Color(0xFF26244A)
     val soft = Color(0xFFB9B3E6)
 
+    DisposableEffect(Unit) {
+        val l = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+            name = if (prefs.file() != null) prefs.name else ""
+        }
+        prefs.sp.registerOnSharedPreferenceChangeListener(l)
+        onDispose { prefs.sp.unregisterOnSharedPreferenceChangeListener(l) }
+    }
+
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
-        runCatching {
-            val type = ctx.contentResolver.getType(uri) ?: ""
-            val out = File(ctx.filesDir, "wall.bin")
-            ctx.contentResolver.openInputStream(uri)!!.use { i -> out.outputStream().use { o -> i.copyTo(o) } }
-            prefs.isVideo = type.startsWith("video")
-            prefs.name = uri.lastPathSegment?.substringAfterLast('/') ?: "wallpaper"
-            prefs.stamp = System.currentTimeMillis()
-            name = prefs.name
-        }.onFailure { Toast.makeText(ctx, errorMsg, Toast.LENGTH_SHORT).show() }
+        Thread {
+            val ok = Importer.import(ctx, uri)
+            if (!ok) Handler(Looper.getMainLooper()).post { Toast.makeText(ctx, errorMsg, Toast.LENGTH_SHORT).show() }
+        }.start()
     }
 
     Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(0xFF2A1B5E), Color(0xFF12111F))))) {
@@ -97,7 +144,7 @@ fun Screen() {
                         color = Color.White, fontSize = 16.sp
                     )
                     Button(
-                        onClick = { picker.launch(arrayOf("image/gif", "image/webp", "video/*")) },
+                        onClick = { picker.launch(arrayOf("image/*", "video/*")) },
                         modifier = Modifier.fillMaxWidth().height(52.dp), shape = RoundedCornerShape(16.dp)
                     ) { Text(stringResource(R.string.pick), fontSize = 16.sp) }
                 }
@@ -140,14 +187,7 @@ fun Screen() {
             }
 
             Button(
-                onClick = {
-                    ctx.startActivity(
-                        Intent(WallpaperManager.ACTION_CHANGE_LIVE_WALLPAPER).putExtra(
-                            WallpaperManager.EXTRA_LIVE_WALLPAPER_COMPONENT,
-                            ComponentName(ctx, LiveWallpaperService::class.java)
-                        )
-                    )
-                },
+                onClick = { openChooser(ctx) },
                 enabled = name.isNotEmpty(),
                 modifier = Modifier.fillMaxWidth().height(56.dp), shape = RoundedCornerShape(18.dp)
             ) { Text(stringResource(R.string.set_wall), fontSize = 17.sp, fontWeight = FontWeight.Bold) }

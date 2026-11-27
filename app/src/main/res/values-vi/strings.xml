@@ -19,4 +19,5 @@
     <string name="original">Gốc 1:1</string>
     <string name="crisp">Điểm ảnh sắc nét</string>
     <string name="crisp_desc">Không làm mịn khi phóng to (nét hơn với ảnh pixel)</string>
+    <string name="updated">Đã cập nhật hình nền</string>
 </resources>

@@ -19,4 +19,5 @@
     <string name="original">Original 1:1</string>
     <string name="crisp">Crisp pixels</string>
     <string name="crisp_desc">No smoothing when enlarging (sharper pixel art)</string>
+    <string name="updated">Wallpaper updated</string>
 </resources>
