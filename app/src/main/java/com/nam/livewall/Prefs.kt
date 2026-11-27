@@ -26,5 +26,8 @@ class Prefs(ctx: Context) {
             .putString("name", name).putLong("stamp", System.currentTimeMillis()).apply()
     }
 
-    companion object { const val AUTO = 0; const val FILL = 1; const val FIT = 2; const val STRETCH = 3; const val ORIGINAL = 4 }
+    companion object {
+        const val K_MODE = "mode"; const val K_PARALLAX = "parallax"; const val K_CRISP = "crisp"
+        const val AUTO = 0; const val FILL = 1; const val FIT = 2; const val STRETCH = 3; const val ORIGINAL = 4
+    }
 }
