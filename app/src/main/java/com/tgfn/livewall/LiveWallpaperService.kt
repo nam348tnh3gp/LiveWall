@@ -1,9 +1,11 @@
 package com.tgfn.livewall
 
 import android.content.SharedPreferences
-import android.graphics.Color
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import android.graphics.ImageDecoder
 import android.graphics.drawable.AnimatedImageDrawable
+import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -20,6 +22,11 @@ import java.io.File
 import kotlin.math.abs
 import kotlin.math.max
 
+/**
+ * Everything (image, GIF/WebP, video) is drawn through one OpenGL renderer per surface ([GlWall]).
+ * A surface must never be used through both EGL and lockCanvas, which is what used to break the
+ * wallpaper (home and lock screen) whenever the file type changed.
+ */
 class LiveWallpaperService : WallpaperService() {
     override fun onCreateEngine(): Engine = WallEngine()
 
@@ -28,27 +35,25 @@ class LiveWallpaperService : WallpaperService() {
         private val handler = Handler(Looper.getMainLooper())
         private val sm = getSystemService(SENSOR_SERVICE) as SensorManager
         private var player: MediaPlayer? = null
-        private var gl: GlVideo? = null
-        private var gen = 0                 // bumped on every release(); invalidates stale async callbacks
+        private var gl: GlWall? = null
+        private var gen = 0                 // bumped on every releaseContent(); invalidates stale async callbacks
         private var prepared = false
         private var retries = 0
-        private var img: Drawable? = null
+        private var img: AnimatedImageDrawable? = null   // only animated images are kept; stills live in the GL texture
+        private var animBmps = arrayOfNulls<Bitmap>(2)
+        private var animIdx = 0
         private var origScale = 1f          // ORIGINAL mode scale (decode sample size)
-        private var ow = 0f
-        private var oh = 0f
         private var visible = false
         private var dirty = false           // source changed while hidden: reload when shown
         private var hasSurface = false
-        private var useHw = true            // hardware canvas for static images (falls back if the device refuses)
         private var w = 0
         private var h = 0
         private var tx = 0f
         private var ty = 0f
         private var targetX = 0f
         private var targetY = 0f
-        private val rect = FloatArray(4)
 
-        // Display options cached here: never read SharedPreferences per frame.
+        // Options cached here: never read SharedPreferences per frame.
         private var mode = Prefs.AUTO
         private var parallax = false
         private var crisp = false
@@ -60,7 +65,7 @@ class LiveWallpaperService : WallpaperService() {
                 tickPosted = false
                 val moving = stepParallax()
                 draw()
-                val animated = img is AnimatedImageDrawable
+                val animated = img != null
                 if (visible && (animated || moving)) {
                     tickPosted = true
                     handler.postDelayed(this, if (animated) 33L else 16L)
@@ -83,8 +88,7 @@ class LiveWallpaperService : WallpaperService() {
                     draw()
                 }
                 // New file (several keys change together): debounce into one reload.
-                // While the wallpaper is hidden (the app is in front) just remember it: decoding a big
-                // image / starting a video on the shared main thread is what made the app UI stutter.
+                // While hidden just remember it: loading on the shared main thread made the app UI stutter.
                 else -> {
                     if (visible) { handler.removeCallbacks(reload); handler.postDelayed(reload, 200) }
                     else { dirty = true }
@@ -120,12 +124,13 @@ class LiveWallpaperService : WallpaperService() {
             draw()
         }
 
-        // The surface dies when the wallpaper is replaced/re-set: drop the player/GL or it errors next time.
+        // The surface dies when the wallpaper is replaced/re-set: drop player and GL or it errors next time.
         override fun onSurfaceDestroyed(holder: SurfaceHolder) {
             hasSurface = false
             handler.removeCallbacks(tick); handler.removeCallbacks(reload)
             tickPosted = false
-            release()
+            releaseContent()
+            releaseGl()
             super.onSurfaceDestroyed(holder)
         }
 
@@ -138,15 +143,14 @@ class LiveWallpaperService : WallpaperService() {
             prefs.sp.unregisterOnSharedPreferenceChangeListener(listener)
             handler.removeCallbacksAndMessages(null)
             sm.unregisterListener(this)
-            release()
+            releaseContent()
+            releaseGl()
             super.onDestroy()
         }
 
-        private fun hasContent() = img != null || gl != null
-
-        /** Schedule one frame (and keep the loop going while parallax is still settling). */
+        /** Schedule one frame (and keep the loop going while animating / parallax is settling). */
         private fun kick() {
-            if (visible && !tickPosted && hasContent()) { tickPosted = true; handler.post(tick) }
+            if (visible && !tickPosted && gl != null) { tickPosted = true; handler.post(tick) }
         }
 
         private fun applyVisibility() {
@@ -154,7 +158,7 @@ class LiveWallpaperService : WallpaperService() {
             sm.unregisterListener(this)
             if (visible) {
                 player?.let { if (prepared && !it.isPlaying) runCatching { it.start() } }
-                (img as? AnimatedImageDrawable)?.start()
+                img?.start()
                 kick()
                 if (parallax) {
                     sm.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)?.let {
@@ -163,43 +167,55 @@ class LiveWallpaperService : WallpaperService() {
                 }
             } else {
                 player?.let { if (prepared && it.isPlaying) runCatching { it.pause() } }
-                (img as? AnimatedImageDrawable)?.stop()
+                img?.stop()
             }
         }
 
-        private fun release() {
+        /** Stops the current file (player / animation). The GL renderer stays: it belongs to the surface. */
+        private fun releaseContent() {
             gen++
             prepared = false
             player?.let { runCatching { it.setOnErrorListener(null); it.reset(); it.release() } }
             player = null
+            img?.let { it.stop(); it.callback = null }
+            img = null
+            animBmps = arrayOfNulls(2)
+        }
+
+        private fun releaseGl() {
             gl?.release()   // after the player, before the surface goes away
             gl = null
-            (img as? AnimatedImageDrawable)?.let { it.stop(); it.callback = null }
-            img = null
         }
 
         private fun load() {
             dirty = false
-            release()
+            releaseContent()
             if (!hasSurface) return
-            val f = prefs.file() ?: return
+            val g = gl ?: GlWall(surfaceHolder.surface).also { gl = it }
+            val f = prefs.file()
+            if (f == null) {
+                g.clear()
+                return
+            }
             try {
-                if (prefs.isVideo) loadVideo(f) else loadImage(f)
+                if (prefs.isVideo) loadVideo(f, g) else loadImage(f, g)
             } catch (e: Throwable) {
-                release()
+                releaseContent()
+                g.clear()
             }
             applyVisibility()
+            draw()
         }
 
-        // ---------------------------------------------------------------- video (OpenGL)
+        // ---------------------------------------------------------------- video
 
-        private fun loadVideo(f: File) {
+        private fun loadVideo(f: File, g: GlWall) {
             val myGen = gen
-            // The GL thread calls back once the video SurfaceTexture exists.
-            gl = GlVideo(surfaceHolder.surface) { vs ->
+            // The GL thread calls back once the video SurfaceTexture is ready.
+            g.useVideoSurface { vs ->
                 handler.post {
                     if (gen != myGen || !hasSurface) return@post
-                    try { startPlayer(f, vs) } catch (e: Throwable) { release() }
+                    try { startPlayer(f, vs) } catch (e: Throwable) { releaseContent() }
                 }
             }
         }
@@ -210,7 +226,7 @@ class LiveWallpaperService : WallpaperService() {
             mp.setSurface(vs)
             mp.setDataSource(f.path)
             mp.isLooping = true
-            // Wallpaper audio: media usage, and no audio focus is requested so it never pauses the user's music.
+            // Media usage; no audio focus is requested so the user's music is never paused.
             mp.setAudioAttributes(
                 AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_MEDIA)
@@ -230,7 +246,7 @@ class LiveWallpaperService : WallpaperService() {
             mp.setOnErrorListener { p, _, _ ->
                 if (player === p) {
                     handler.removeCallbacks(reload)
-                    if (retries++ < 3) handler.postDelayed(reload, 500) else release()
+                    if (retries++ < 3) handler.postDelayed(reload, 500) else releaseContent()
                 }
                 true
             }
@@ -242,27 +258,54 @@ class LiveWallpaperService : WallpaperService() {
             runCatching { mp.setVolume(v, v) }
         }
 
-        // ---------------------------------------------------------------- image (Canvas)
+        // ---------------------------------------------------------------- image / GIF / WebP
 
-        private fun loadImage(f: File) {
-            val d = ImageDecoder.decodeDrawable(ImageDecoder.createSource(f)) { dec, info, _ ->
-                // Hardware bitmaps draw fine on a hardware canvas; use software only after a fallback.
-                if (!useHw) dec.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+        private fun loadImage(f: File, g: GlWall) {
+            var sample = 1
+            // Software bitmaps only: they are uploaded to a GL texture.
+            fun decode(limit: Int): Drawable = ImageDecoder.decodeDrawable(ImageDecoder.createSource(f)) { dec, info, _ ->
+                dec.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
                 val big = max(info.size.width, info.size.height)
-                val sample = if (big > 4096) (big + 4095) / 4096 else 1
+                sample = if (big > limit) (big + limit - 1) / limit else 1
                 if (sample > 1) dec.setTargetSampleSize(sample)
-                origScale = sample.toFloat()
-                ow = (info.size.width / sample).toFloat(); oh = (info.size.height / sample).toFloat()
             }
-            if (d is AnimatedImageDrawable) {
-                d.repeatCount = AnimatedImageDrawable.REPEAT_INFINITE
-                d.callback = object : Drawable.Callback {
-                    override fun invalidateDrawable(who: Drawable) {}
-                    override fun scheduleDrawable(who: Drawable, what: Runnable, `when`: Long) {}
-                    override fun unscheduleDrawable(who: Drawable, what: Runnable) {}
+            var d = decode(4096)
+            // Animated images keep one bitmap per frame, so cap them lower (rare: re-decode once).
+            if (d is AnimatedImageDrawable && max(d.intrinsicWidth, d.intrinsicHeight) > 2048) d = decode(2048)
+            origScale = sample.toFloat()
+            when (d) {
+                is AnimatedImageDrawable -> {
+                    d.repeatCount = AnimatedImageDrawable.REPEAT_INFINITE
+                    d.callback = object : Drawable.Callback {
+                        override fun invalidateDrawable(who: Drawable) {}
+                        override fun scheduleDrawable(who: Drawable, what: Runnable, `when`: Long) {}
+                        override fun unscheduleDrawable(who: Drawable, what: Runnable) {}
+                    }
+                    val bw = max(1, d.intrinsicWidth); val bh = max(1, d.intrinsicHeight)
+                    animBmps = arrayOf(
+                        Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888),
+                        Bitmap.createBitmap(bw, bh, Bitmap.Config.ARGB_8888)
+                    )
+                    img = d
                 }
+                is BitmapDrawable -> {
+                    var b = d.bitmap
+                    if (b.config != Bitmap.Config.ARGB_8888) b = b.copy(Bitmap.Config.ARGB_8888, false)
+                    g.setImage(b, origScale, recycle = true)   // we own it; the texture keeps the pixels
+                }
+                else -> error("unsupported image")
             }
-            img = d
+        }
+
+        /** Renders the current animation frame into a spare bitmap and hands it to GL. */
+        private fun pushAnimatedFrame(d: AnimatedImageDrawable) {
+            val b = animBmps[animIdx] ?: return
+            animIdx = animIdx xor 1
+            b.eraseColor(0)
+            val c = Canvas(b)
+            d.setBounds(0, 0, b.width, b.height)
+            d.draw(c)
+            gl?.setImage(b, origScale, recycle = false)
         }
 
         /** Smooths the parallax offset; returns true while it is still moving. */
@@ -273,34 +316,9 @@ class LiveWallpaperService : WallpaperService() {
         }
 
         private fun draw() {
-            gl?.let { it.render(mode, parallax, crisp, tx, ty); return }
-            val d = img ?: return
-            if (w == 0 || h == 0) return
-            val animated = d is AnimatedImageDrawable
-            val hw = useHw && !animated   // animated drawables need the software canvas to advance frames
-            val c = try {
-                if (hw) surfaceHolder.lockHardwareCanvas() else surfaceHolder.lockCanvas()
-            } catch (e: Throwable) {
-                if (hw) { useHw = false; handler.post(reload) }
-                null
-            } ?: return
-            try {
-                c.drawColor(Color.BLACK)
-                val iw = if (ow > 0) ow else d.intrinsicWidth.toFloat()
-                val ih = if (oh > 0) oh else d.intrinsicHeight.toFloat()
-                if (iw <= 0 || ih <= 0) return
-                d.setFilterBitmap(!crisp)
-                Layout.rect(mode, parallax, w, h, iw, ih, origScale, tx, ty, rect)
-                d.setBounds(
-                    rect[0].toInt(), rect[1].toInt(),
-                    (rect[0] + rect[2]).toInt(), (rect[1] + rect[3]).toInt()
-                )
-                d.draw(c)
-            } catch (e: Throwable) {
-                // never crash the wallpaper process on a bad frame
-            } finally {
-                runCatching { surfaceHolder.unlockCanvasAndPost(c) }
-            }
+            val g = gl ?: return
+            img?.let { pushAnimatedFrame(it) }
+            g.render(mode, parallax, crisp, tx, ty)
         }
 
         override fun onSensorChanged(e: SensorEvent) {
