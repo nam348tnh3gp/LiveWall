@@ -1,6 +1,10 @@
 package com.tgfn.livewall
 
 import android.app.KeyguardManager
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -21,6 +25,7 @@ import android.os.Looper
 import android.service.wallpaper.WallpaperService
 import android.view.Surface
 import android.view.SurfaceHolder
+import androidx.core.content.ContextCompat
 import java.io.File
 import kotlin.math.abs
 import kotlin.math.max
@@ -132,6 +137,18 @@ class LiveWallpaperService : WallpaperService() {
             return prefs.path(lock) != loadedPath || prefs.isVideo(lock) != loadedVideo
         }
 
+        // The same engine can stay visible while the keyguard goes up or down (lock -> unlock), so no
+        // visibility event fires. Watch the screen / unlock broadcasts to swap lock <-> home file.
+        private val screenReceiver = object : BroadcastReceiver() {
+            override fun onReceive(c: Context, i: Intent) {
+                handler.post {
+                    if (hasSurface && needsReload()) {
+                        if (visible) { handler.removeCallbacks(reload); handler.post(reload) } else dirty = true
+                    }
+                }
+            }
+        }
+
         private fun readSettings() {
             mode = prefs.mode; parallax = prefs.parallax; crisp = prefs.crisp; sound = prefs.sound
             if (!parallax) { tx = 0f; ty = 0f; targetX = 0f; targetY = 0f }
@@ -141,6 +158,14 @@ class LiveWallpaperService : WallpaperService() {
             super.onCreate(holder)
             readSettings()
             prefs.sp.registerOnSharedPreferenceChangeListener(listener)
+            val f = IntentFilter().apply {
+                addAction(Intent.ACTION_SCREEN_ON); addAction(Intent.ACTION_USER_PRESENT)
+            }
+            runCatching {
+                ContextCompat.registerReceiver(
+                    this@LiveWallpaperService, screenReceiver, f, ContextCompat.RECEIVER_NOT_EXPORTED
+                )
+            }
         }
 
         override fun onSurfaceCreated(holder: SurfaceHolder) {
@@ -178,6 +203,7 @@ class LiveWallpaperService : WallpaperService() {
 
         override fun onDestroy() {
             prefs.sp.unregisterOnSharedPreferenceChangeListener(listener)
+            runCatching { unregisterReceiver(screenReceiver) }
             handler.removeCallbacksAndMessages(null)
             sm.unregisterListener(this)
             releaseContent()
