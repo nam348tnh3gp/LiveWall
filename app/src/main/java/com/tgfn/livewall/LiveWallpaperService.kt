@@ -41,6 +41,7 @@ class LiveWallpaperService : WallpaperService() {
         private var gen = 0                 // bumped on every releaseContent(); invalidates stale async callbacks
         private var prepared = false
         private var retries = 0
+        private var savedPos = 0          // resume position (ms) so the video does not restart from 0 after hide/show
         private var img: AnimatedImageDrawable? = null   // only animated images are kept; stills live in the GL texture
         private var animBmps = arrayOfNulls<Bitmap>(2)
         private var animIdx = 0
@@ -185,6 +186,8 @@ class LiveWallpaperService : WallpaperService() {
         }
 
         private fun stopPlayer() {
+            // Remember where we left off so the next start resumes instead of jumping to the beginning.
+            if (prepared) runCatching { savedPos = player?.currentPosition ?: savedPos }
             gen++
             prepared = false
             player?.let { runCatching { it.setOnErrorListener(null); it.reset(); it.release() } }
@@ -198,6 +201,7 @@ class LiveWallpaperService : WallpaperService() {
 
         private fun load() {
             dirty = false
+            savedPos = 0                 // new source (or full reload) starts at the beginning
             releaseContent()
             if (!hasSurface) return
             val g = gl ?: GlWall(surfaceHolder.surface).also { gl = it }
@@ -263,7 +267,12 @@ class LiveWallpaperService : WallpaperService() {
                 if (player !== p) return@setOnPreparedListener
                 gl?.setVideoSize(p.videoWidth, p.videoHeight)
                 prepared = true; retries = 0
-                if (visible) runCatching { p.start() }
+                if (savedPos > 0) {
+                    p.setOnSeekCompleteListener { if (visible && player === p) runCatching { p.start() } }
+                    runCatching { p.seekTo(savedPos) }
+                } else if (visible) {
+                    runCatching { p.start() }
+                }
                 draw()
             }
             mp.setOnErrorListener { p, what, extra ->
