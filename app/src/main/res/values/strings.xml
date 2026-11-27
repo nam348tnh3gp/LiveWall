@@ -1,0 +1,18 @@
+<resources>
+    <string name="app_name">LiveWall</string>
+    <string name="title">Live Wallpaper</string>
+    <string name="subtitle">GIF, WebP and video as sharp wallpaper</string>
+    <string name="pick">Choose GIF / Video</string>
+    <string name="none">No file selected yet</string>
+    <string name="selected">Selected: %1$s</string>
+    <string name="mode_title">Display mode</string>
+    <string name="fill">Fill</string>
+    <string name="fit">Fit</string>
+    <string name="stretch">Stretch</string>
+    <string name="mode_note">Fit applies to GIF/WebP. Video uses Fill or Stretch.</string>
+    <string name="parallax">3D parallax</string>
+    <string name="parallax_desc">Image shifts as you tilt the phone (GIF/WebP)</string>
+    <string name="set_wall">Set as wallpaper</string>
+    <string name="language">Language</string>
+    <string name="copy_error">Could not open this file</string>
+</resources>

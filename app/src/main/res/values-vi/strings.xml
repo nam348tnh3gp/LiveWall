@@ -1,0 +1,18 @@
+<resources>
+    <string name="app_name">LiveWall</string>
+    <string name="title">Hình nền động</string>
+    <string name="subtitle">GIF, WebP và video thành hình nền sắc nét</string>
+    <string name="pick">Chọn GIF / Video</string>
+    <string name="none">Chưa chọn tệp nào</string>
+    <string name="selected">Đã chọn: %1$s</string>
+    <string name="mode_title">Chế độ hiển thị</string>
+    <string name="fill">Lấp đầy</string>
+    <string name="fit">Vừa khít</string>
+    <string name="stretch">Kéo giãn</string>
+    <string name="mode_note">Vừa khít áp dụng cho GIF/WebP. Video dùng Lấp đầy hoặc Kéo giãn.</string>
+    <string name="parallax">Parallax 3D</string>
+    <string name="parallax_desc">Ảnh dịch chuyển khi nghiêng máy (GIF/WebP)</string>
+    <string name="set_wall">Đặt làm hình nền</string>
+    <string name="language">Ngôn ngữ</string>
+    <string name="copy_error">Không mở được tệp này</string>
+</resources>
