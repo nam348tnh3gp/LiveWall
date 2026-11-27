@@ -5,13 +5,14 @@
     <string name="pick">Chọn GIF / Video</string>
     <string name="none">Chưa chọn tệp nào</string>
     <string name="selected">Đã chọn: %1$s</string>
+    <string name="selected_label">Tệp đã chọn</string>
     <string name="mode_title">Chế độ hiển thị</string>
     <string name="fill">Lấp đầy</string>
     <string name="fit">Vừa khít</string>
     <string name="stretch">Kéo giãn</string>
-    <string name="mode_note">Tự căn giữ đúng tỉ lệ, không kéo giãn. Gốc 1:1 giữ nguyên độ phân giải. Video dùng Lấp đầy hoặc Kéo giãn.</string>
+    <string name="mode_note">Tự căn giữ đúng tỉ lệ, không kéo giãn. Gốc 1:1 giữ nguyên độ phân giải. Parallax cần Tự căn hoặc Lấp đầy.</string>
     <string name="parallax">Parallax 3D</string>
-    <string name="parallax_desc">Ảnh dịch chuyển khi nghiêng máy (GIF/WebP)</string>
+    <string name="parallax_desc">Ảnh dịch chuyển khi nghiêng máy (GIF/WebP/video)</string>
     <string name="set_wall">Đặt làm hình nền</string>
     <string name="language">Ngôn ngữ</string>
     <string name="copy_error">Không mở được tệp này</string>

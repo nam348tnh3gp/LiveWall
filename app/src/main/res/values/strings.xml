@@ -5,13 +5,14 @@
     <string name="pick">Choose GIF / Video</string>
     <string name="none">No file selected yet</string>
     <string name="selected">Selected: %1$s</string>
+    <string name="selected_label">Selected file</string>
     <string name="mode_title">Display mode</string>
     <string name="fill">Fill</string>
     <string name="fit">Fit</string>
     <string name="stretch">Stretch</string>
-    <string name="mode_note">Auto keeps the aspect ratio, never stretches. Original 1:1 keeps the exact resolution. Video uses Fill or Stretch.</string>
+    <string name="mode_note">Auto keeps the aspect ratio, never stretches. Original 1:1 keeps the exact resolution. Parallax needs Auto or Fill.</string>
     <string name="parallax">3D parallax</string>
-    <string name="parallax_desc">Image shifts as you tilt the phone (GIF/WebP)</string>
+    <string name="parallax_desc">Image shifts as you tilt the phone (GIF/WebP/video)</string>
     <string name="set_wall">Set as wallpaper</string>
     <string name="language">Language</string>
     <string name="copy_error">Could not open this file</string>

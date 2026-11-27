@@ -4,10 +4,10 @@ plugins {
     id("org.jetbrains.kotlin.plugin.compose")
 }
 android {
-    namespace = "com.nam.livewall"
+    namespace = "com.tgfn.livewall"
     compileSdk = 35
     defaultConfig {
-        applicationId = "com.nam.livewall"
+        applicationId = "com.tgfn.livewall"
         minSdk = 28
         targetSdk = 35
         versionCode = 1
